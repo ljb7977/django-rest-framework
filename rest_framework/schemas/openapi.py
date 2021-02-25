@@ -50,7 +50,7 @@ class SchemaGenerator(BaseSchemaGenerator):
                         'You have a duplicated operationId in your OpenAPI schema: {operation_id}\n'
                         '\tRoute: {route1}, Method: {method1}\n'
                         '\tRoute: {route2}, Method: {method2}\n'
-                        '\tAn operationId has to be unique accros your schema. Your schema may not work in other tools.'
+                        '\tAn operationId has to be unique across your schema. Your schema may not work in other tools.'
                         .format(
                             route1=ids[operation_id]['route'],
                             method1=ids[operation_id]['method'],
@@ -554,7 +554,9 @@ class AutoSchema(ViewInspector):
             if isinstance(v, URLValidator):
                 schema['format'] = 'uri'
             if isinstance(v, RegexValidator):
-                schema['pattern'] = v.regex.pattern
+                # In Python, the token \Z does what \z does in other engines.
+                # https://stackoverflow.com/questions/53283160
+                schema['pattern'] = v.regex.pattern.replace('\\Z', '\\z')
             elif isinstance(v, MaxLengthValidator):
                 attr_name = 'maxLength'
                 if isinstance(field, serializers.ListField):
@@ -593,7 +595,7 @@ class AutoSchema(ViewInspector):
         media_types = []
         for renderer in self.view.renderer_classes:
             # BrowsableAPIRenderer not relevant to OpenAPI spec
-            if renderer == renderers.BrowsableAPIRenderer:
+            if issubclass(renderer, renderers.BrowsableAPIRenderer):
                 continue
             media_types.append(renderer.media_type)
         return media_types
