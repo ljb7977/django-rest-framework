@@ -11,187 +11,187 @@ will take some serious design work.
 >
 > &mdash; Russell Keith-Magee, [Django users group][cite]
 
-Serializers allow complex data such as querysets and model instances to be converted to native Python datatypes that can then be easily rendered into `JSON`, `XML` or other content types.  Serializers also provide deserialization, allowing parsed data to be converted back into complex types, after first validating the incoming data.
+시리얼라이저를 사용하면 쿼리셋 및 모델 인스턴스와 같은 복잡한 데이터를 네이티브 Python 데이터 타입으로 변환한 다음 JSON, XML 또는 기타 컨텐츠 타입으로 쉽게 렌더링할 수 있습니다. 시리얼라이저는 역직렬화(deserialization) 기능을 제공하는데, 들어오는 데이터의 유효성을 먼저 검사한 후 파싱된 데이터를 복잡한 타입(쿼리셋 등)으로 다시 변환할 수 있습니다.
 
-The serializers in REST framework work very similarly to Django's `Form` and `ModelForm` classes. We provide a `Serializer` class which gives you a powerful, generic way to control the output of your responses, as well as a `ModelSerializer` class which provides a useful shortcut for creating serializers that deal with model instances and querysets.
+REST 프레임워크의 시리얼라이저는 Django의 `Form` 및 `ModelForm` 클래스와 매우 유사하게 작동합니다. `Serializer` 클래스는 응답의 출력을 제어하는 ​​강력하고 일반적인 방법을 제공하며, `ModelSerializer` 클래스는 모델 인스턴스와 쿼리셋을 처리하는 시리얼라이저를 쉽게 만드는 지름길을 제공합니다.
 
-## Declaring Serializers
+## 시리얼라이저 선언하기
 
-Let's start by creating a simple object we can use for example purposes:
+간단한 예제 객체를 만드는 것으로 시작해 봅시다.
+```python
+from datetime import datetime
 
-    from datetime import datetime
+class Comment(object):
+    def __init__(self, email, content, created=None):
+        self.email = email
+        self.content = content
+        self.created = created or datetime.now()
 
-    class Comment:
-        def __init__(self, email, content, created=None):
-            self.email = email
-            self.content = content
-            self.created = created or datetime.now()
+comment = Comment(email='leila@example.com', content='foo bar')
+```
+`Comment` 객체에 대응되는 데이터를 직렬화하고 역직렬화하는 데에 사용할 수 있는 시리얼라이저를 선언할 것입니다.
 
-    comment = Comment(email='leila@example.com', content='foo bar')
+시리얼라이저 선언은 폼 선언과 매우 비슷합니다 :
+```python
+from rest_framework import serializers
 
-We'll declare a serializer that we can use to serialize and deserialize data that corresponds to `Comment` objects.
+class CommentSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    content = serializers.CharField(max_length=200)
+    created = serializers.DateTimeField()
+```
+## 객체 직렬화하기
 
-Declaring a serializer looks very similar to declaring a form:
+이제 주석 또는 주석의 목록을 직렬화하기 위해 `CommentSerializer`를 사용할 수 있습니다. 다시 한번, `Serializer` 클래스를 사용하는 것은 `Form` 클래스를 사용하는 것과 매우 유사합니다.
+```python
+serializer = CommentSerializer(comment)
+serializer.data
+# {'email': 'leila@example.com', 'content': 'foo bar', 'created': '2016-01-27T15:17:10.375877'}
+```
+이 시점에서 우리는 모델 인스턴스를 Python 기본 데이터 타입으로 변환했습니다. 직렬화 과정을 마무리하기 위해 데이터를 `json`으로 렌더링합니다.
+```python
+from rest_framework.renderers import JSONRenderer
 
-    from rest_framework import serializers
+json = JSONRenderer().render(serializer.data)
+json
+# b'{"email":"leila@example.com","content":"foo bar","created":"2016-01-27T15:17:10.375877"}'
+```
+## 객체 역직렬화하기
 
-    class CommentSerializer(serializers.Serializer):
-        email = serializers.EmailField()
-        content = serializers.CharField(max_length=200)
-        created = serializers.DateTimeField()
+역직렬화는 직렬화와 비슷합니다. 먼저 스트림을 Python 기본 데이터 타입으로 파싱합니다.
+```python
+import io
+from rest_framework.parsers import JSONParser
 
-## Serializing objects
+stream = io.BytesIO(json)
+data = JSONParser().parse(stream)
+```
+그 다음엔 그 기본 데이터 타입을 검증된 데이터들의 딕셔너리로 복원합니다.
+```python
+serializer = CommentSerializer(data=data)
+serializer.is_valid()
+# True
+serializer.validated_data
+# {'content': 'foo bar', 'email': 'leila@example.com', 'created': datetime.datetime(2012, 08, 22, 16, 20, 09, 822243)}
+```
+## 인스턴스 저장
 
-We can now use `CommentSerializer` to serialize a comment, or list of comments. Again, using the `Serializer` class looks a lot like using a `Form` class.
+검증된 데이터를 가지고 완전한 객체 인스턴스를 리턴하려면 `.create()` 와 `.update()` 메소드 중 하나, 혹은 둘 다를 구현해야 합니다. 예를 들면 다음과 같습니다.
+```python
+class CommentSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    content = serializers.CharField(max_length=200)
+    created = serializers.DateTimeField()
 
-    serializer = CommentSerializer(comment)
-    serializer.data
-    # {'email': 'leila@example.com', 'content': 'foo bar', 'created': '2016-01-27T15:17:10.375877'}
+    def create(self, validated_data):
+        return Comment(**validated_data)
 
-At this point we've translated the model instance into Python native datatypes.  To finalise the serialization process we render the data into `json`.
+    def update(self, instance, validated_data):
+        instance.email = validated_data.get('email', instance.email)
+        instance.content = validated_data.get('content', instance.content)
+        instance.created = validated_data.get('created', instance.created)
+        return instance
+```
 
-    from rest_framework.renderers import JSONRenderer
+객체 인스턴스가 Django 모델인 경우, 이 메소드들이 객체를 데이터베이스에 저장해야 할 수도 있습니다. 예를 들어, `Comment`가 Django 모델이라면 다음과 같이 만들 수 있습니다.
+```python
+def create(self, validated_data):
+    return Comment.objects.create(**validated_data)
 
-    json = JSONRenderer().render(serializer.data)
-    json
-    # b'{"email":"leila@example.com","content":"foo bar","created":"2016-01-27T15:17:10.375877"}'
+def update(self, instance, validated_data):
+    instance.email = validated_data.get('email', instance.email)
+    instance.content = validated_data.get('content', instance.content)
+    instance.created = validated_data.get('created', instance.created)
+    instance.save()
+    return instance
+```
+이제 데이터를 역직렬화할 때, 유효성 검사된 데이터를 가지고 `.save()`를 호출하여 객체 인스턴스를 리턴할 수 있습니다.
+```python
+comment = serializer.save()
+```
+`.save()`를 호출할 때, 시리얼라이저 클래스를 인스턴스화할 때 기존 인스턴스가 전달됐다면 새 인스턴스가 생기고, 전달되지 않았다면 기존 인스턴스가 업데이트됩니다.
+```python
+# .save() will create a new instance.
+serializer = CommentSerializer(data=data)
 
-## Deserializing objects
+# .save() will update the existing `comment` instance.
+serializer = CommentSerializer(comment, data=data)
+```
+`.create()`와 `.update()` 메소드는 모두 선택 사항입니다. 시리얼라이저 클래스의 사용 케이스에 따라 하나만 구현하거나 둘 모두 구현할 수 있습니다.
 
-Deserialization is similar. First we parse a stream into Python native datatypes...
+#### `.save()`에 추가 속성 전달
 
-    import io
-    from rest_framework.parsers import JSONParser
+경우에 따라 인스턴스를 저장할 때 뷰 코드가 추가 데이터를 주입할 수 있어야 할 수도 있습니다. 이 추가 데이터에는 현재 사용자, 현재 시간, 요청 데이터의 일부, 혹은 어떤 다른 정보든 포함될 수 있습니다.
 
-    stream = io.BytesIO(json)
-    data = JSONParser().parse(stream)
+`.save()`를 호출할 때 추가 키워드 아규먼트를 포함하면 그렇게 할 수 있습니다. 예를 들면 다음과 같습니다.
+```python
+serializer.save(owner=request.user)
+```
+`.create()`나 `.update()`가 호출될 때 어떤 추가 키워드 인자든 `validated_data` 에 포함될 수 있습니다.
 
-...then we restore those native datatypes into a dictionary of validated data.
+#### `.save()`를 직접 오버라이드하기.
 
-    serializer = CommentSerializer(data=data)
-    serializer.is_valid()
-    # True
-    serializer.validated_data
-    # {'content': 'foo bar', 'email': 'leila@example.com', 'created': datetime.datetime(2012, 08, 22, 16, 20, 09, 822243)}
+경우에 따라 `.create()`나 `.update()`라는 메소드 이름이 의미가 없을 수도 있습니다. 예를 들어, 새 인스턴스를 만들지 않고 대신 이메일이나 다른 메시지를 보내는 연락처 폼이 있을 수 있습니다.
 
-## Saving instances
+이 경우, 보다 읽기 쉽고 의미있도록 `.save()`를 직접 오버라이드할 수 있습니다.
+```python
+class ContactForm(serializers.Serializer):
+    email = serializers.EmailField()
+    message = serializers.CharField()
 
-If we want to be able to return complete object instances based on the validated data we need to implement one or both of the `.create()` and `.update()` methods. For example:
+    def save(self):
+        email = self.validated_data['email']
+        message = self.validated_data['message']
+        send_email(from=email, message=message)
+```
+위의 경우 시리얼라이저의 `.validated_data` 속성에 직접 액세스해야 하는 것에 유의하세요.
 
-    class CommentSerializer(serializers.Serializer):
-        email = serializers.EmailField()
-        content = serializers.CharField(max_length=200)
-        created = serializers.DateTimeField()
+## 유효성 검사 (Validation)
 
-        def create(self, validated_data):
-            return Comment(**validated_data)
+데이터를 역직렬화하는 경우, 유효성 검사된 데이터에 액세스하거나 객체 인스턴스를 저장하기 전에는 항상 `is_valid()`를 호출해야 합니다. 유효성 검사 오류가 발생하면 `.errors` 속성에 결과 오류 메시지를 나타내는 딕셔너리가 들어갑니다. 예를 들면 다음과 같습니다.
+```python
+serializer = CommentSerializer(data={'email': 'foobar', 'content': 'baz'})
+serializer.is_valid()
+# False
+serializer.errors
+# {'email': ['Enter a valid e-mail address.'], 'created': ['This field is required.']}
+```
+딕셔너리의 각 키는 필드 이름이 되고, 값은 해당 필드에 해당하는 오류 메시지의 문자열 목록이 됩니다. `non_field_errors` 키도 존재할 수 있으며, 이때는 일반적인 유효성 검사 오류가 나열됩니다. `non_field_errors` 키의 이름은 REST 프레임워크 설정의 `NON_FIELD_ERRORS_KEY`의 값을 수정하여 바꿀 수 있습니다.
 
-        def update(self, instance, validated_data):
-            instance.email = validated_data.get('email', instance.email)
-            instance.content = validated_data.get('content', instance.content)
-            instance.created = validated_data.get('created', instance.created)
-            return instance
+항목의 리스트를 역직렬화할 때는, 각 역직렬화된 항목을 나타내는 딕셔너리의 리스트가 오류로써 반환됩니다.
 
-If your object instances correspond to Django models you'll also want to ensure that these methods save the object to the database. For example, if `Comment` was a Django model, the methods might look like this:
+#### 유효하지 않은 데이터에 대해 예외 발생시키기
 
-        def create(self, validated_data):
-            return Comment.objects.create(**validated_data)
+`.is_valid()` 메소드는 선택적인 `raise_exception` 플래그를 사용하여 유효성 검사 오류가 있는 경우 `serializers.ValidationError` 예외를 발생시킵니다.
 
-        def update(self, instance, validated_data):
-            instance.email = validated_data.get('email', instance.email)
-            instance.content = validated_data.get('content', instance.content)
-            instance.created = validated_data.get('created', instance.created)
-            instance.save()
-            return instance
+이러한 예외는 REST 프레임워크가 제공하는 기본 예외 핸들러에 의해 자동으로 처리되며 기본적으로 `HTTP 400 Bad Request` 응답을 리턴합니다.
+```python
+# Return a 400 response if the data was invalid.
+serializer.is_valid(raise_exception=True)
+```
+#### 필드 수준 유효성 검사
 
-Now when deserializing data, we can call `.save()` to return an object instance, based on the validated data.
-
-    comment = serializer.save()
-
-Calling `.save()` will either create a new instance, or update an existing instance, depending on if an existing instance was passed when instantiating the serializer class:
-
-    # .save() will create a new instance.
-    serializer = CommentSerializer(data=data)
-
-    # .save() will update the existing `comment` instance.
-    serializer = CommentSerializer(comment, data=data)
-
-Both the `.create()` and `.update()` methods are optional. You can implement either neither, one, or both of them, depending on the use-case for your serializer class.
-
-#### Passing additional attributes to `.save()`
-
-Sometimes you'll want your view code to be able to inject additional data at the point of saving the instance. This additional data might include information like the current user, the current time, or anything else that is not part of the request data.
-
-You can do so by including additional keyword arguments when calling `.save()`. For example:
-
-    serializer.save(owner=request.user)
-
-Any additional keyword arguments will be included in the `validated_data` argument when `.create()` or `.update()` are called.
-
-#### Overriding `.save()` directly.
-
-In some cases the `.create()` and `.update()` method names may not be meaningful. For example, in a contact form we may not be creating new instances, but instead sending an email or other message.
-
-In these cases you might instead choose to override `.save()` directly, as being more readable and meaningful.
-
-For example:
-
-    class ContactForm(serializers.Serializer):
-        email = serializers.EmailField()
-        message = serializers.CharField()
-
-        def save(self):
-            email = self.validated_data['email']
-            message = self.validated_data['message']
-            send_email(from=email, message=message)
-
-Note that in the case above we're now having to access the serializer `.validated_data` property directly.
-
-## Validation
-
-When deserializing data, you always need to call `is_valid()` before attempting to access the validated data, or save an object instance. If any validation errors occur, the `.errors` property will contain a dictionary representing the resulting error messages.  For example:
-
-    serializer = CommentSerializer(data={'email': 'foobar', 'content': 'baz'})
-    serializer.is_valid()
-    # False
-    serializer.errors
-    # {'email': ['Enter a valid e-mail address.'], 'created': ['This field is required.']}
-
-Each key in the dictionary will be the field name, and the values will be lists of strings of any error messages corresponding to that field.  The `non_field_errors` key may also be present, and will list any general validation errors. The name of the `non_field_errors` key may be customized using the `NON_FIELD_ERRORS_KEY` REST framework setting.
-
-When deserializing a list of items, errors will be returned as a list of dictionaries representing each of the deserialized items.
-
-#### Raising an exception on invalid data
-
-The `.is_valid()` method takes an optional `raise_exception` flag that will cause it to raise a `serializers.ValidationError` exception if there are validation errors.
-
-These exceptions are automatically dealt with by the default exception handler that REST framework provides, and will return `HTTP 400 Bad Request` responses by default.
-
-    # Return a 400 response if the data was invalid.
-    serializer.is_valid(raise_exception=True)
-
-#### Field-level validation
-
-You can specify custom field-level validation by adding `.validate_<field_name>` methods to your `Serializer` subclass.  These are similar to the `.clean_<field_name>` methods on Django forms.
+`.validate_<field_name>` 메소드를 여러분의 `Serializer` 서브클래스에 추가하여 커스텀 필드 수준 유효성 검사를 지정할 수 있습니다. 이것은 장고 폼의 `.clean_<field_name>` 메소드와 비슷합니다.
 
 These methods take a single argument, which is the field value that requires validation.
+이런 메소드는 유효성 검사가 필요한 필드 값 하나를 인자로 받습니다.
 
-Your `validate_<field_name>` methods should return the validated value or raise a `serializers.ValidationError`.  For example:
+`validate_<field_name>` 메소드는 검사된 값을 반환하거나 `serializers.ValidationError`를 발생시켜야 합니다. 예를 들면 다음과 같습니다.
+```python
+from rest_framework import serializers
 
-    from rest_framework import serializers
+class BlogPostSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=100)
+    content = serializers.CharField()
 
-    class BlogPostSerializer(serializers.Serializer):
-        title = serializers.CharField(max_length=100)
-        content = serializers.CharField()
-
-        def validate_title(self, value):
-            """
-            Check that the blog post is about Django.
-            """
-            if 'django' not in value.lower():
-                raise serializers.ValidationError("Blog post is not about Django")
-            return value
-
+    def validate_title(self, value):
+        """
+        Check that the blog post is about Django.
+        """
+        if 'django' not in value.lower():
+            raise serializers.ValidationError("Blog post is not about Django")
+        return value
+```
 ---
 
 **Note:** If your `<field_name>` is declared on your serializer with the parameter `required=False` then this validation step will not take place if the field is not included.
